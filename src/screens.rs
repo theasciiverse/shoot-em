@@ -403,10 +403,10 @@ pub fn score(
     r.load_identity();
     r.light([-20.0, 20.0, 20.0, 1.0]);
     r.color3(0.0, 0.0, 1.0);
-    r.translate(0.0, if h >= 50 { 0.6 } else { 0.85 }, -3.0);
+    r.translate(0.0, if h >= 50 { 0.6 } else { 1.22 }, -3.0);
     r.rotate((t as f32 / 2000.0).sin() * 20.0, 0.0, 1.0, 0.0);
     r.rotate((t as f32 / 1000.0).sin() * 5.0, 0.0, 0.0, 1.0);
-    text3d(r, "Your Score", 0.07, 0.2);
+    text3d(r, "Your Score", if h >= 50 { 0.07 } else { 0.055 }, 0.2);
 
     s.put(cx + 32, oy + 20, 0xf, &format!(">>>> {:06} <<<<", g.score));
     blink_arrows(s, cx, oy + 20, t);
