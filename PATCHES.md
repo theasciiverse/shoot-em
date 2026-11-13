@@ -29,7 +29,7 @@ permission (PERMISSION.md). The original release is kept, unchanged, in
 
 ## Different
 
-- **Any terminal size** (60x20 at least), not a fixed 80x50 console.
+- **Any terminal size** (80x24 at least), not a fixed 80x50 console.
   Terminal cells are twice as tall as wide, so each cell takes twice as
   many samples down as across, and the view is as wide as the window.
   The HUD keeps its place: centred, with its bottom boxes at the bottom.

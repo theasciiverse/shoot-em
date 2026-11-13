@@ -291,10 +291,10 @@ fn run(opts: &Options, au: &mut Audio, table: &mut hiscore::Table, log: &mut Log
             scr.invalidate();
             let _ = write!(out, "\x1b[0m\x1b[2J");
         }
-        if w < 60 || h < 20 {
+        if w < 80 || h < 24 {
             scr.resize(w, h);
             scr.clear_cells();
-            scr.put(0, 0, 0xc, "Shoot 'em needs at least 60x20");
+            scr.put(0, 0, 0xc, "Shoot 'em needs at least 80x24");
             let _ = scr.present(&mut out);
             std::thread::sleep(Duration::from_millis(100));
             continue;
