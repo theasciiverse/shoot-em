@@ -16,15 +16,16 @@ start it from `av`.
 
 Mouse: aim; the left button fires the machine guns, the right button
 drops a mine. Keys: arrows aim, Space fires, M drops a mine, Escape
-returns to the menu.
+returns to the menu, S shows or hides the sound scope.
 
 ```
-shoot-em [letters] [--truecolor] [--mute] [--demo] [--seed N]
+shoot-em [letters] [--truecolor] [--mute] [--classic] [--demo] [--seed N]
 ```
 
 The original's letters still work: `a` best antialiasing, `n` none, `f`
 frames per second, `m` male narrator, `c` no debris, `p` twice the
-debris. `--truecolor` colours each character with its real colour.
+debris. `--truecolor` colours each character with its real colour, and
+`--classic` shows the 2005 screen exactly, without the sound scope.
 
 ## About this edition
 
@@ -32,3 +33,11 @@ The original's source is lost; Jan Ringoš gave his permission to rebuild
 it from the program itself (PERMISSION.md). How the original works is in
 REVERSE.md, and what this edition does differently is in PATCHES.md. His
 original release is kept in `original/`.
+
+## Music
+
+Crush (Asciiverse remix) after Drozerix's Crush (public domain); Digital
+Rendezvous (Asciiverse remix) after Drozerix's Digital Rendezvous (public
+domain); Mecanum Overdrive (Asciiverse remix) after Drozerix's Mecanum
+Overdrive (public domain); Level 1 to 3 and Title Screen by Juhani Junkala, from "5
+Chiptunes (Action)" (CC0, `assets/music/levels/junkala-INFO.txt`).

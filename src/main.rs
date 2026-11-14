@@ -10,6 +10,7 @@ mod gfx;
 mod hiscore;
 mod input;
 mod logo;
+mod scope;
 mod screens;
 
 use crossterm::event::{
@@ -39,6 +40,8 @@ pub struct Options {
     pub demo: bool,
     pub seed: Option<u64>,
     pub quit_after: Option<u32>,
+    /// Jan's 2005 screen exactly: no oscilloscope
+    pub classic: bool,
 }
 
 impl Default for Options {
@@ -54,6 +57,7 @@ impl Default for Options {
             demo: false,
             seed: None,
             quit_after: None,
+            classic: false,
         }
     }
 }
@@ -76,12 +80,14 @@ Options:
   --truecolor   colour each character with its real colour, not the
                 original's 16 console colours
   --mute        no sound or music
+  --classic     Jan's 2005 screen exactly as it was (no sound scope)
   --demo        the computer plays (straight into a game)
   --seed N      repeatable games
   --help        this text
 
 Mouse: aim, left button fires the machine guns, right button drops a mine.
-Keys: arrows aim, Space fires, M drops a mine, Escape returns to the menu.
+Keys: arrows aim, Space fires, M drops a mine, Escape returns to the menu,
+S shows or hides the sound scope (remembered).
 ";
 
 fn parse_args() -> Options {
@@ -100,6 +106,7 @@ fn parse_args() -> Options {
             "--truecolor" => o.truecolor = true,
             "--mute" | "--silent" => o.mute = true,
             "--demo" => o.demo = true,
+            "--classic" => o.classic = true,
             "--seed" => o.seed = args.next().and_then(|s| s.parse().ok()),
             "--quit-after" => o.quit_after = args.next().and_then(|s| s.parse().ok()),
             s if !s.starts_with('-') => {
@@ -136,6 +143,21 @@ fn state_dir() -> Option<PathBuf> {
         Some(home.join("Library/Application Support/shoot-em"))
     } else {
         Some(home.join(".local/state/shoot-em"))
+    }
+}
+
+/// settings.txt in the state folder: `scope=on` or `scope=off`.
+fn load_scope(dir: &Option<PathBuf>) -> bool {
+    dir.as_ref()
+        .and_then(|d| std::fs::read_to_string(d.join("settings.txt")).ok())
+        .map(|t| !t.lines().any(|l| l.trim() == "scope=off"))
+        .unwrap_or(true)
+}
+
+fn save_scope(dir: &Option<PathBuf>, on: bool) {
+    if let Some(d) = dir {
+        let _ = std::fs::create_dir_all(d);
+        let _ = std::fs::write(d.join("settings.txt"), format!("scope={}\n", if on { "on" } else { "off" }));
     }
 }
 
@@ -225,14 +247,21 @@ fn main() {
         prev_hook(info);
     }));
 
-    let code = run(&opts, &mut au, &mut table, &mut log);
+    let code = run(&opts, &mut au, &mut table, &mut log, &dir);
     au.stop_song();
     drop(term);
     log.line("quit");
     std::process::exit(code);
 }
 
-fn run(opts: &Options, au: &mut Audio, table: &mut hiscore::Table, log: &mut Log) -> i32 {
+fn run(
+    opts: &Options,
+    au: &mut Audio,
+    table: &mut hiscore::Table,
+    log: &mut Log,
+    dir: &Option<PathBuf>,
+) -> i32 {
+    let mut scope_on = !opts.classic && load_scope(dir);
     let seed = opts.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -307,6 +336,7 @@ fn run(opts: &Options, au: &mut Audio, table: &mut hiscore::Table, log: &mut Log
         last = now;
         clock = clock.wrapping_add(dt);
         total = total.wrapping_add(dt);
+        au.tick(dt);
 
         // keyboard aiming moves the mouse cell
         if input.moved_by_keys != (0, 0) && state == State::Game {
@@ -332,10 +362,20 @@ fn run(opts: &Options, au: &mut Audio, table: &mut hiscore::Table, log: &mut Log
                     input.my = h as i32 / 2;
                 }
                 State::NameEntry => {
-                    au.play_song(Song::Menu);
+                    au.play_song(Song::End);
                     ne = screens::NameEntry::new();
                 }
-                State::HighScores => hof_top = 0,
+                State::Score => {
+                    if !au.is_playing(Song::End) {
+                        au.play_song(Song::End);
+                    }
+                }
+                State::HighScores => {
+                    hof_top = 0;
+                    if !au.is_playing(Song::End) {
+                        au.play_song(Song::End);
+                    }
+                }
                 State::Instructions => scroll = 0,
                 _ => {}
             }
@@ -432,6 +472,40 @@ fn run(opts: &Options, au: &mut Audio, table: &mut hiscore::Table, log: &mut Log
                 next = screens::score(&mut ren, &mut scr, &input, t, &game);
             }
             State::Quit => return 0,
+        }
+
+        // S toggles the sound scope (not while typing a name)
+        if !opts.classic
+            && state != State::NameEntry
+            && input.typed.iter().any(|&c| c == 's' || c == 'S')
+        {
+            scope_on = !scope_on;
+            save_scope(dir, scope_on);
+            log.line(&format!("scope {}", if scope_on { "on" } else { "off" }));
+        }
+        if scope_on {
+            let (wi, hi) = (w as i32, h as i32);
+            let cx = (wi - 80) / 2;
+            let samples = au.scope.snapshot();
+            match state {
+                // one row along the very bottom, under the HUD's boxes
+                State::Game => scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x3),
+                State::Menu => {
+                    let (y, rows) = if hi >= 50 { ((hi - 50) / 2 + 40, 3) } else { (hi - 8, 2) };
+                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                }
+                State::Score => {
+                    if hi >= 50 {
+                        scope::draw(&mut scr, cx + 8, (hi - 50) / 2 + 44, 64, 3, &samples, 1.6, 0x9);
+                    } else {
+                        scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x9);
+                    }
+                }
+                State::HighScores | State::NameEntry => {
+                    scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x9)
+                }
+                _ => {}
+            }
         }
 
         let pw = w * ss;

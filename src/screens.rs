@@ -162,11 +162,12 @@ pub fn menu(r: &mut Renderer, s: &mut Screen, input: &Input, t: u32, clock: u32)
         1,
         "Terminal edition for Asciiverse, 2026, by his permission.",
     );
+    s.put(cx + 6, cy + 3, 1, "Freeware. Music: Crush, Digital Rendezvous, Mecanum Overdrive remixes");
     s.put(
-        cx + 15,
-        cy + 3,
+        cx + 6,
+        cy + 4,
         1,
-        "This game is freeware. Music: The Kid, Matt Furniss.",
+        "after Drozerix; Level 1 to 3 and Title Screen by Juhani Junkala (CC0).",
     );
     if input.key_esc {
         return Some(State::Quit);
@@ -224,6 +225,7 @@ const INSTRUCTIONS: &[(i32, i32, u8, &str)] = &[
         8,
         "    Keys: arrows aim, Space fires, M drops a mine.",
     ),
+    (25, 15, 8, "    S shows or hides the sound scope."),
     (25, 16, 0xf, "HEALTH"),
     (
         25,
