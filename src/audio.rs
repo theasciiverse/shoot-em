@@ -60,9 +60,10 @@ enum Track {
 }
 
 /// In turn during play: Juhani Junkala's Level 1 to 3 from "5 Chiptunes
-/// (Action)" (CC0), and Digital Rendezvous and Mecanum Overdrive
-/// (Asciiverse remixes), after Drozerix's originals (public domain).
-const LEVEL_SONGS: [Track; 5] = [
+/// (Action)" (CC0); Digital Rendezvous and Mecanum Overdrive (Asciiverse
+/// remixes), after Drozerix's originals (public domain); and Tunnel Vision
+/// by fuzion_mixer, CC BY 4.0, remixed and extended by Asciiverse.
+const LEVEL_SONGS: [Track; 6] = [
     Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-1.ogg")),
     Track::Module(include_bytes!("../assets/music/levels/digital-rendezvous-remix-heavy.xm"), 2.2),
     Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-2.ogg")),
@@ -70,6 +71,9 @@ const LEVEL_SONGS: [Track; 5] = [
     // builds its drums over about 2:40 and then loops at its peak; the
     // playlist plays it once through from the start, then moves on
     Track::Module(include_bytes!("../assets/music/levels/mecanum-remix-heavy.xm"), 1.65),
+    // Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended by
+    // Asciiverse: 6:50 once through
+    Track::Module(include_bytes!("../assets/music/levels/tunnel-vision-extended.it"), 2.3),
 ];
 /// Juhani Junkala, Title Screen (CC0): after a game and in the Hall of Fame.
 const END_SONG: &[u8] = include_bytes!("../assets/music/end/junkala-title-screen.ogg");

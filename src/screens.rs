@@ -162,12 +162,12 @@ pub fn menu(r: &mut Renderer, s: &mut Screen, input: &Input, t: u32, clock: u32)
         1,
         "Terminal edition for Asciiverse, 2026, by his permission.",
     );
-    s.put(cx + 6, cy + 3, 1, "Freeware. Music: Crush, Digital Rendezvous, Mecanum Overdrive remixes");
+    s.put(cx + 6, cy + 3, 1, "Freeware. Music: remixes after Drozerix (public domain) and fuzion_mixer");
     s.put(
         cx + 6,
         cy + 4,
         1,
-        "after Drozerix; Level 1 to 3 and Title Screen by Juhani Junkala (CC0).",
+        "(CC BY 4.0); Juhani Junkala (CC0). Full credits under INSTRUCTIONS.",
     );
     if input.key_esc {
         return Some(State::Quit);
@@ -293,6 +293,11 @@ const INSTRUCTIONS: &[(i32, i32, u8, &str)] = &[
         7,
         "Press Escape or click BACK to return to the menu.",
     ),
+    (3, 45, 0xf, "MUSIC"),
+    (3, 46, 7, "Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended"),
+    (3, 47, 7, "by Asciiverse (creativecommons.org/licenses/by/4.0/)."),
+    (3, 48, 8, "Crush, Digital Rendezvous, Mecanum Overdrive: remixes after Drozerix"),
+    (3, 49, 8, "(public domain). Level 1 to 3, Title Screen: Juhani Junkala (CC0)."),
 ];
 
 const ICONS: &[(i32, Kind, bool, bool)] = &[
@@ -328,7 +333,7 @@ pub fn instructions(
     let cx = (w - 80) / 2;
     let aspect = w as f32 / (2.0 * h as f32);
     let view = h - 4; // rows above the BACK button
-    let max_scroll = (44 - view).max(0);
+    let max_scroll = (50 - view).max(0);
     if input.wheel != 0 || input.up || input.down {
         *scroll += input.wheel * 3 + if input.down { 3 } else { 0 } - if input.up { 3 } else { 0 };
     }

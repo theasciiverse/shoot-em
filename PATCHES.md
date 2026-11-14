@@ -59,7 +59,10 @@ permission (PERMISSION.md). The original release is kept, unchanged, in
   - in game, one after another, carrying on from game to game: Juhani
     Junkala's Level 1, 2 and 3 from "5 Chiptunes (Action)" (CC0), and
     Digital Rendezvous and Mecanum Overdrive (Asciiverse remixes), after
-    Drozerix's originals (public domain), each played once through;
+    Drozerix's originals (public domain), and (v1.0.0-av.3) Tunnel Vision
+    by fuzion_mixer, CC BY 4.0, remixed and extended by Asciiverse
+    (6:50), each played once through; the full credits are at the end
+    of the instructions screen;
   - after a game and in the Hall of Fame: Junkala's Title Screen (CC0).
   Music levels are set to sit just under the effects.
 - **The sound scope (v1.0.0-av.2):** the game's own mix, music and effects
