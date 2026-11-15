@@ -45,6 +45,8 @@ pub struct Options {
     pub classic: bool,
     /// start in groove mode (also a menu switch, remembered)
     pub groove: bool,
+    /// testing: open this screen directly (menu, score, name, hiscores)
+    pub screen: Option<String>,
 }
 
 impl Default for Options {
@@ -62,6 +64,7 @@ impl Default for Options {
             quit_after: None,
             classic: false,
             groove: false,
+            screen: None,
         }
     }
 }
@@ -116,6 +119,7 @@ fn parse_args() -> Options {
             "--demo" => o.demo = true,
             "--classic" => o.classic = true,
             "--groove" => o.groove = true,
+            "--screen" => o.screen = args.next(),
             "--seed" => o.seed = args.next().and_then(|s| s.parse().ok()),
             "--quit-after" => o.quit_after = args.next().and_then(|s| s.parse().ok()),
             s if !s.starts_with('-') => {
@@ -330,7 +334,14 @@ fn run(
         my: h as i32 / 2,
         ..Default::default()
     };
-    let mut state = if opts.demo { State::Game } else { State::Intro };
+    let mut state = match opts.screen.as_deref() {
+        Some("menu") => State::Menu,
+        Some("score") => State::Score,
+        Some("name") => State::NameEntry,
+        Some("hiscores") => State::HighScores,
+        _ if opts.demo => State::Game,
+        _ => State::Intro,
+    };
     let mut entered = true;
     let mut t: u32 = 0;
     let mut game = game::Game::new(&mut rng);
@@ -695,25 +706,32 @@ fn run(
                     } else {
                         (hi - 3, 1)
                     };
-                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                    let (x0, sw) = screens::MENU_SPAN;
+                    scope::draw(&mut scr, cx + x0, y, sw, rows, &samples, 1.6, 0xb);
                 }
+                // each screen's scope spans that screen's own content block
+                // (screens::*_SPAN), centred on its button, not on the
+                // terminal
                 State::Score => {
                     // the OK button ends at oy + 42
                     let oy = if hi >= 50 { (hi - 50) / 2 } else { hi - 44 };
                     let (y, rows) = under(oy + 42);
-                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                    let (x0, sw) = screens::SCORE_SPAN;
+                    scope::draw(&mut scr, cx + x0, y, sw, rows, &samples, 1.6, 0xb);
                 }
                 State::HighScores => {
                     // the BACK button ends two rows below its top
                     let by = if hi >= 50 { (hi - 50) / 2 + 45 } else { hi - 3 };
                     let (y, rows) = under(by + 2);
-                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                    let (x0, sw) = screens::HALL_SPAN;
+                    scope::draw(&mut scr, cx + x0, y, sw, rows, &samples, 1.6, 0xb);
                 }
                 State::NameEntry => {
                     // the OK button: the original's rows 45 to 47
                     let bottom = if hi >= 50 { (hi - 50) / 2 + 47 } else { (hi - 21) / 2 + 17 };
                     let (y, rows) = under(bottom);
-                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                    let (x0, sw) = screens::NAME_SPAN;
+                    scope::draw(&mut scr, cx + x0, y, sw, rows, &samples, 1.6, 0xb);
                 }
                 _ => {}
             }

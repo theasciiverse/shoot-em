@@ -764,3 +764,17 @@ pub fn calibrate(s: &mut Screen, input: &Input, taps: &[f64], offset_ms: f64, fl
 /// Taps needed (after the first two, which are let go) before the offset
 /// is set.
 pub const CALIBRATE_TAPS: usize = 10;
+
+/// Where the sound scope goes on each screen, as (first column, width) in
+/// the 80-column layout: the same left and right edges as the screen's own
+/// content, and centred on its button.
+/// The menu: its four buttons span columns 8 to 71.
+pub const MENU_SPAN: (i32, i32) = (8, 64);
+/// The score: the statistics run from column 10 to about 75; OK is centred
+/// on 40.
+pub const SCORE_SPAN: (i32, i32) = (10, 60);
+/// Name entry: the stars and the message lines, 18 to 61; OK centred on 40.
+pub const NAME_SPAN: (i32, i32) = (18, 44);
+/// The Hall of Fame: the list starts at column 24 and the scroll buttons
+/// end at 73; BACK is centred on 49.5, and so is this.
+pub const HALL_SPAN: (i32, i32) = (24, 51);

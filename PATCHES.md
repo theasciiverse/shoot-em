@@ -50,6 +50,12 @@ permission (PERMISSION.md). The original release is kept, unchanged, in
   menu calibrates: clicks at 100 BPM, the median of ten taps (after two
   warm-ups) is the offset. Groove scores go to `hiscores-groove.txt`.
   The demo pilot fires short bursts starting on the beat.
+- **The sound scope sits with each screen's content** (1.1.0-av.2): on
+  the menu, score, name entry and Hall of Fame it spans that screen's own
+  block and is centred on its button (`screens::*_SPAN`), not on the
+  terminal; the Hall of Fame's list and BACK sit right of centre, so its
+  scope does too. `--screen menu|score|name|hiscores` opens a screen
+  directly, for checking layouts.
 - **Any terminal size** (80x24 at least), not a fixed 80x50 console.
   Terminal cells are twice as tall as wide, so each cell takes twice as
   many samples down as across, and the view is as wide as the window.
