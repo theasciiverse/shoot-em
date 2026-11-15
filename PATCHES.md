@@ -59,15 +59,21 @@ permission (PERMISSION.md). The original release is kept, unchanged, in
   - in game, one after another, carrying on from game to game: Juhani
     Junkala's Level 1, 2 and 3 from "5 Chiptunes (Action)" (CC0), and
     Digital Rendezvous and Mecanum Overdrive (Asciiverse remixes), after
-    Drozerix's originals (public domain), and (v1.0.0-av.3) Tunnel Vision
+    Drozerix's originals (public domain), Girl From Mars (Asciiverse
+    extended mix, v1.0.0-av.4) after Drozerix's (public domain), and
+    (v1.0.0-av.3) Tunnel Vision
     by fuzion_mixer, CC BY 4.0, remixed and extended by Asciiverse
     (6:50), each played once through; the full credits are at the end
     of the instructions screen;
   - after a game and in the Hall of Fame: Junkala's Title Screen (CC0).
-  Music levels are set to sit just under the effects.
+  Levels (v1.0.0-av.4) are measured as integrated loudness (EBU R128)
+  through the game's own playback: menu and end music both -16 LUFS;
+  every in-game song -19 LUFS, under the guns (-14.5) and blasts (-11.6).
 - **The sound scope (v1.0.0-av.2):** the game's own mix, music and effects
-  together, drawn as a Braille oscilloscope (after Bellbeat's): one row
-  along the bottom in play, larger on the menu and score screens. S shows
+  together, drawn as a Braille oscilloscope (after Bellbeat's): in play,
+  a row of its own directly above the HUD's boxes; on the menu, score,
+  name entry and Hall of Fame screens, up to three rows just under the
+  content (v1.0.0-av.4, which also made it bright cyan). S shows
   or hides it, remembered in `settings.txt` in the state folder;
   `--classic` shows Jan's 2005 screen exactly, without it. With `--mute`
   the game still runs the mix silently, so the scope moves and nothing is

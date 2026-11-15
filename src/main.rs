@@ -487,22 +487,42 @@ fn run(
             let (wi, hi) = (w as i32, h as i32);
             let cx = (wi - 80) / 2;
             let samples = au.scope.snapshot();
+            // just under a screen's content (its last button ends at
+            // `bottom`): up to three rows where the terminal allows, else
+            // the last row
+            let under = |bottom: i32| -> (i32, i32) {
+                let y = bottom + 2;
+                if y < hi {
+                    (y, (hi - y).min(3))
+                } else {
+                    (hi - 1, 1)
+                }
+            };
             match state {
-                // one row along the very bottom, under the HUD's boxes
-                State::Game => scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x3),
+                // its own row, directly above the HUD's boxes, as wide as
+                // the HUD (the boxes are kept at the bottom: rows h-6 to h-2)
+                State::Game => scope::draw(&mut scr, cx + 2, hi - 7, 77, 1, &samples, 1.6, 0xb),
                 State::Menu => {
                     let (y, rows) = if hi >= 50 { ((hi - 50) / 2 + 40, 3) } else { (hi - 8, 2) };
                     scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
                 }
                 State::Score => {
-                    if hi >= 50 {
-                        scope::draw(&mut scr, cx + 8, (hi - 50) / 2 + 44, 64, 3, &samples, 1.6, 0x9);
-                    } else {
-                        scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x9);
-                    }
+                    // the OK button ends at oy + 42
+                    let oy = if hi >= 50 { (hi - 50) / 2 } else { hi - 44 };
+                    let (y, rows) = under(oy + 42);
+                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
                 }
-                State::HighScores | State::NameEntry => {
-                    scope::draw(&mut scr, cx + 2, hi - 1, 77, 1, &samples, 1.6, 0x9)
+                State::HighScores => {
+                    // the BACK button ends two rows below its top
+                    let by = if hi >= 50 { (hi - 50) / 2 + 45 } else { hi - 3 };
+                    let (y, rows) = under(by + 2);
+                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
+                }
+                State::NameEntry => {
+                    // the OK button: the original's rows 45 to 47
+                    let bottom = if hi >= 50 { (hi - 50) / 2 + 47 } else { (hi - 21) / 2 + 17 };
+                    let (y, rows) = under(bottom);
+                    scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
                 }
                 _ => {}
             }

@@ -296,8 +296,8 @@ const INSTRUCTIONS: &[(i32, i32, u8, &str)] = &[
     (3, 45, 0xf, "MUSIC"),
     (3, 46, 7, "Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended"),
     (3, 47, 7, "by Asciiverse (creativecommons.org/licenses/by/4.0/)."),
-    (3, 48, 8, "Crush, Digital Rendezvous, Mecanum Overdrive: remixes after Drozerix"),
-    (3, 49, 8, "(public domain). Level 1 to 3, Title Screen: Juhani Junkala (CC0)."),
+    (3, 48, 8, "Remixes after Drozerix (public domain): Crush, Digital Rendezvous,"),
+    (3, 49, 8, "Mecanum Overdrive, Girl From Mars. Level 1 to 3, Title Screen: Junkala (CC0)."),
 ];
 
 const ICONS: &[(i32, Kind, bool, bool)] = &[

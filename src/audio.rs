@@ -60,30 +60,36 @@ enum Track {
 }
 
 /// In turn during play: Juhani Junkala's Level 1 to 3 from "5 Chiptunes
-/// (Action)" (CC0); Digital Rendezvous and Mecanum Overdrive (Asciiverse
-/// remixes), after Drozerix's originals (public domain); and Tunnel Vision
-/// by fuzion_mixer, CC BY 4.0, remixed and extended by Asciiverse.
-const LEVEL_SONGS: [Track; 6] = [
+/// (Action)" (CC0); Digital Rendezvous, Mecanum Overdrive and Girl From
+/// Mars (Asciiverse remixes), after Drozerix's originals (public domain);
+/// and Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended by
+/// Asciiverse.
+const LEVEL_SONGS: [Track; 7] = [
     Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-1.ogg")),
-    Track::Module(include_bytes!("../assets/music/levels/digital-rendezvous-remix-heavy.xm"), 2.2),
+    Track::Module(include_bytes!("../assets/music/levels/digital-rendezvous-remix-heavy.xm"), 2.13),
     Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-2.ogg")),
     Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-3.ogg")),
     // builds its drums over about 2:40 and then loops at its peak; the
     // playlist plays it once through from the start, then moves on
-    Track::Module(include_bytes!("../assets/music/levels/mecanum-remix-heavy.xm"), 1.65),
+    Track::Module(include_bytes!("../assets/music/levels/mecanum-remix-heavy.xm"), 2.41),
     // Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended by
     // Asciiverse: 6:50 once through
-    Track::Module(include_bytes!("../assets/music/levels/tunnel-vision-extended.it"), 2.3),
+    Track::Module(include_bytes!("../assets/music/levels/tunnel-vision-extended.it"), 2.17),
+    // Girl From Mars (Asciiverse extended mix), after Drozerix (public domain)
+    Track::Module(include_bytes!("../assets/music/levels/girl_from_mars-extended.xm"), 2.11),
 ];
 /// Juhani Junkala, Title Screen (CC0): after a game and in the Hall of Fame.
 const END_SONG: &[u8] = include_bytes!("../assets/music/end/junkala-title-screen.ogg");
 /// The menu song plays through, rests this long, and starts again.
 const MENU_REST: Duration = Duration::from_secs(2);
-/// Music gains, measured to sit just under the effects (the guns and
-/// blasts are about 0.11 to 0.14 RMS): each song about 0.095 RMS.
+/// Music gains, measured as integrated loudness (EBU R128, ffmpeg's
+/// ebur128) through the game's own playback: the menu and the end music
+/// both about -16 LUFS; every in-game song about -19 LUFS, under the guns
+/// (-14.5) and the blasts (-11.6). Module trims below match each module
+/// to the Ogg songs.
 const MENU_GAIN: f32 = 0.75;
 const LEVEL_GAIN: f32 = 0.25;
-const END_GAIN: f32 = 0.27;
+const END_GAIN: f32 = 0.413;
 /// Samples kept for the oscilloscope (mono).
 pub const SCOPE: usize = 2048;
 
