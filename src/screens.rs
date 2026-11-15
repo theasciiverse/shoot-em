@@ -83,6 +83,8 @@ pub enum State {
     Game,
     Score,
     NameEntry,
+    /// groove mode: tap along to clicks to set the timing offset
+    Calibrate,
     Quit,
 }
 
@@ -111,7 +113,16 @@ pub fn intro(r: &mut Renderer, t: u32) {
     gfx::prims(r, crate::logo::LOGO);
 }
 
-pub fn menu(r: &mut Renderer, s: &mut Screen, input: &Input, t: u32, clock: u32) -> Option<State> {
+/// The main menu. `groove` is groove mode (None with --classic, where the
+/// menu is Jan's own); its button toggles it.
+pub fn menu(
+    r: &mut Renderer,
+    s: &mut Screen,
+    input: &Input,
+    t: u32,
+    clock: u32,
+    groove: Option<&mut bool>,
+) -> Option<State> {
     let w = s.w as i32;
     let h = s.h as i32;
     let cx = (w - 80) / 2;
@@ -143,6 +154,19 @@ pub fn menu(r: &mut Renderer, s: &mut Screen, input: &Input, t: u32, clock: u32)
     }
     if button(s, input, cx + 64, by, "EXIT", 0x40, 0x04) {
         go = Some(State::Quit);
+    }
+    // groove mode: its switch and the timing calibration, under the row
+    if let Some(g) = groove {
+        let label = if *g { "GROOVE MODE: ON " } else { "GROOVE MODE: OFF" };
+        let (on, off) = if *g { (0x50, 0x0d) } else { (0x80, 0x07) };
+        if button(s, input, cx + 17, by + 4, label, on, off) || input.typed.iter().any(|&c| c == 'g' || c == 'G') {
+            *g = !*g;
+        }
+        if button(s, input, cx + 41, by + 4, "CALIBRATE TIMING", 0x80, 0x07)
+            || input.typed.iter().any(|&c| c == 'c' || c == 'C')
+        {
+            go = Some(State::Calibrate);
+        }
     }
     // the buttons slide in from the left, as they did
     for x in 0..w.max(80) {
@@ -287,6 +311,8 @@ const INSTRUCTIONS: &[(i32, i32, u8, &str)] = &[
         "    Carries 160 ultra bullets for rapid fire mode.",
     ),
     (3, 41, 0xf, "MORE INFO: "),
+    (15, 41, 0xd, "GROOVE MODE (G in the menu): fire on the beat for a combo,"),
+    (15, 42, 0xd, "up to x5 on every kill; things fall in on it. C calibrates."),
     (
         10,
         43,
@@ -544,6 +570,7 @@ pub fn high_scores(
     t: u32,
     table: &Table,
     top: &mut i32,
+    subtitle: &str,
 ) -> Option<State> {
     let w = s.w as i32;
     let h = s.h as i32;
@@ -553,7 +580,7 @@ pub fn high_scores(
     let shown = (list_rows / 3).max(1);
     stars(r, w, h, oy + 3, t, cx + 26, cx + 53);
     s.put(cx + 34, oy + 2, 0xf, "HALL OF FAME");
-    s.put(cx + 32, oy + 4, 8, "The best players");
+    s.put(cx + 40 - subtitle.len() as i32 / 2, oy + 4, 8, subtitle);
     let max_top = table.entries.len() as i32 - shown;
     if input.up || input.wheel < 0 {
         *top -= 1;
@@ -705,3 +732,35 @@ pub fn name_entry(
     }
     None
 }
+
+/// Calibration: clicks at a steady 100 BPM; the player taps along with
+/// Space or the left button. `taps` are their offsets from the clicks in
+/// seconds; the median, once there are enough, is the timing offset.
+pub fn calibrate(s: &mut Screen, input: &Input, taps: &[f64], offset_ms: f64, flash: bool) -> Option<State> {
+    let w = s.w as i32;
+    let h = s.h as i32;
+    let cx = (w - 80) / 2;
+    let oy = if h >= 50 { (h - 50) / 2 + 10 } else { 2 };
+    s.put(cx + 31, oy, 0xf, "CALIBRATE TIMING");
+    s.put(cx + 12, oy + 3, 7, "Tap Space (or the left button) on every click you hear.");
+    s.put(cx + 12, oy + 4, 7, "Groove mode takes your sound's delay and your own timing");
+    s.put(cx + 12, oy + 5, 7, "into account, so on the beat feels on the beat.");
+    let dot = if flash { "########" } else { "        " };
+    s.put(cx + 36, oy + 8, if flash { 0x5f } else { 0x07 }, dot);
+    s.put(cx + 36, oy + 9, if flash { 0x5f } else { 0x07 }, dot);
+    let need = CALIBRATE_TAPS.saturating_sub(taps.len());
+    if need > 0 {
+        s.put(cx + 30, oy + 12, 0xb, &format!("{need:>2} more taps to go   "));
+    } else {
+        s.put(cx + 26, oy + 12, 0xa, &format!("Your offset: {offset_ms:+.0} ms (saved)   "));
+    }
+    s.put(cx + 22, oy + 14, 8, &format!("Current offset: {offset_ms:+.0} ms. Escape: back."));
+    if input.key_esc || input.key_enter || button(s, input, cx + 35, oy + 17, "BACK", 0x80, 0x07) {
+        return Some(State::Menu);
+    }
+    None
+}
+
+/// Taps needed (after the first two, which are let go) before the offset
+/// is set.
+pub const CALIBRATE_TAPS: usize = 10;

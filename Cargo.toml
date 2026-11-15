@@ -1,6 +1,6 @@
 [package]
 name = "shoot-em"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Shoot 'em: Jan Ringos' 3D shooter drawn in coloured text, rebuilt for today's terminals"
 license-file = "LICENSE"

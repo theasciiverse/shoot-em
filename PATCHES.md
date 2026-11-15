@@ -29,6 +29,27 @@ permission (PERMISSION.md). The original release is kept, unchanged, in
 
 ## Different
 
+- **Groove mode** (1.1.0, David's idea, 2026-11-15; off by default,
+  never with `--classic`): G in the menu or `--groove`, remembered in
+  `settings.txt`. The in-game playlist counts the frames it plays and
+  notes each beat (`audio.rs`, `Beats`): for the modules, every 4 rows at
+  the song's speed (doubled until the pulse is 0.38 to 0.9 s), bars
+  every 16; for Junkala's three Ogg songs, a grid measured once from the
+  audio by onset autocorrelation weighted to the kick (`OGG_GRID`: Level
+  1 at 181.09 BPM, played as its 90.5 BPM half-time pulse on the kicks,
+  Levels 2 and 3 at 105.5; each loop a whole number of bars). The game's
+  clock is those frames, carried on by the wall clock between updates,
+  less the calibration offset (`groove.rs`, after Bellbeat). A fire
+  press is timed when it is read and judged: PERFECT within 70 ms, GOOD
+  within 130 ms; each press on a beat adds to a combo (x2 at 4, up to x5
+  at 16) that multiplies kill points, and earns 50 or 20 points times
+  the multiplier; four beats without one end the combo. Objects fall on
+  the beats, as many as the timer would have sent over that time, plus
+  one on a bar whose loudness is 15% over the running average and two
+  at 35%. The sound scope swells and turns white on each beat. C in the
+  menu calibrates: clicks at 100 BPM, the median of ten taps (after two
+  warm-ups) is the offset. Groove scores go to `hiscores-groove.txt`.
+  The demo pilot fires short bursts starting on the beat.
 - **Any terminal size** (80x24 at least), not a fixed 80x50 console.
   Terminal cells are twice as tall as wide, so each cell takes twice as
   many samples down as across, and the view is as wide as the window.

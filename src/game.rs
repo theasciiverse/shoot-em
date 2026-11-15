@@ -209,6 +209,10 @@ pub struct Game {
     guns: [Frame; 2],
     aim: (f32, f32),
     pub over: bool,
+    /// groove mode: what kills are worth, x1 to x5 with the combo
+    pub groove_mult: u32,
+    /// groove mode: spawns owed to the beat so far
+    owed: f32,
 }
 
 impl Game {
@@ -233,11 +237,19 @@ impl Game {
             guns: [gun_base(0.5), gun_base(-0.5)],
             aim: (0.0, 1.1),
             over: false,
+            groove_mult: 1,
+            owed: 0.0,
         }
     }
 
     pub fn aim(&self) -> (f32, f32) {
         self.aim
+    }
+
+    /// Points for a kill or a catch, times the groove multiplier (x1 out of
+    /// groove mode).
+    fn points(&mut self, n: u32) {
+        self.score += n * self.groove_mult.max(1);
     }
 
     fn voice(&self, opts: &Options, male: usize, female: usize) -> usize {
@@ -249,6 +261,9 @@ impl Game {
     }
 
     /// One frame: `dt` ms since the last one, `t` ms since the game began.
+    /// In groove mode `beat` says what the music's beats did this frame,
+    /// and objects fall in on them instead of on the timer.
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
         dt: u32,
@@ -257,6 +272,7 @@ impl Game {
         opts: &Options,
         au: &Audio,
         rng: &mut Rng,
+        beat: Option<crate::groove::BeatTick>,
     ) {
         let dtf = dt as f32;
         let vy = c.vy.clamp(0.0, 49.0);
@@ -381,12 +397,35 @@ impl Game {
         }
         self.particles.retain(|p| p.t < 3.0);
 
-        // something new falls
-        if self.spawn_timer <= 0.0 {
-            self.spawn(rng);
-            self.spawn_timer = self.spawn_every;
-        } else {
-            self.spawn_timer -= dtf * 0.001;
+        // something new falls: on the timer, or in groove mode on the beat,
+        // as many as the timer would have sent over that beat, and a wave
+        // more when a loud bar begins
+        match beat {
+            None => {
+                if self.spawn_timer <= 0.0 {
+                    self.spawn(rng);
+                    self.spawn_timer = self.spawn_every;
+                } else {
+                    self.spawn_timer -= dtf * 0.001;
+                }
+            }
+            Some(b) => {
+                if b.beats > 0 {
+                    self.owed += b.beats as f32 * b.period as f32 / self.spawn_every;
+                    let mut n = self.owed.floor() as u32;
+                    self.owed -= n as f32;
+                    if b.downbeat {
+                        if b.energy > 1.35 {
+                            n += 2;
+                        } else if b.energy > 1.15 {
+                            n += 1;
+                        }
+                    }
+                    for _ in 0..n.min(6) {
+                        self.spawn(rng);
+                    }
+                }
+            }
         }
 
         self.ground(opts, au, rng);
@@ -563,7 +602,7 @@ impl Game {
                 let m = self.mines[mi];
                 if segment_hits(prev, b.pos, m.pos, 0.75) {
                     self.blasts.push(Blast { pos: m.pos, r: 4.0 });
-                    self.score += 1000;
+                    self.points(1000);
                     au.play(
                         sfx::BLAST + rng.below(4) as usize,
                         (m.pos[0] * 16.0 + 128.0) as i32,
@@ -585,13 +624,13 @@ impl Game {
         let col = Self::colour_of(&o);
         match o.kind {
             Kind::Sphere => {
-                self.score += if o.size < 0.6 { 50 } else { 25 };
+                self.points(if o.size < 0.6 { 50 } else { 25 });
                 self.stats.spheres.0 += 1;
                 au.play(sfx::BLAST + rng.below(4) as usize, o.pan(), o.vol());
                 self.burst(at, col, 16, opts, rng);
             }
             Kind::Box => {
-                self.score += 25;
+                self.points(25);
                 self.stats.boxes.0 += 1;
                 au.play(sfx::BLAST + rng.below(4) as usize, o.pan(), o.vol());
                 self.burst(at, col, 8, opts, rng);
@@ -599,20 +638,20 @@ impl Game {
             Kind::Armor => {
                 au.play(sfx::PICKUP, 128, 255);
                 self.health = (self.health + 5.0).min(100.0);
-                self.score += 200;
+                self.points(200);
                 self.stats.armor.0 += 1;
                 self.burst(at, col, 6, opts, rng);
             }
             Kind::Bonus => {
                 au.play(sfx::PICKUP, 128, 255);
-                self.score += 2000;
+                self.points(2000);
                 self.stats.bonuses.0 += 1;
                 self.burst(at, col, 4, opts, rng);
             }
             Kind::Mine => {
                 self.blasts.push(Blast { pos: at, r: 4.0 });
                 au.play(sfx::BLAST + rng.below(4) as usize, o.pan(), 255);
-                self.score += 1000;
+                self.points(1000);
                 self.stats.mines.0 += 1;
             }
             Kind::Ammo => {
@@ -627,7 +666,7 @@ impl Game {
                 if rng.f() >= 0.5 {
                     self.mines_left += 1;
                 }
-                self.score += 100;
+                self.points(100);
                 self.burst(at, col, 16, opts, rng);
             }
         }
@@ -647,7 +686,7 @@ impl Game {
                 .any(|o| gfx::dist(m.pos, o.pos()) <= 0.75 + o.size)
             {
                 self.blasts.push(Blast { pos: m.pos, r: 4.0 });
-                self.score += 1000;
+                self.points(1000);
                 self.stats.mines_hit += 1;
                 au.play(
                     sfx::BLAST + rng.below(4) as usize,
@@ -1295,7 +1334,7 @@ mod tests {
         let mut t = 0;
         while t < 60_000 && !g.over {
             let c = g.autopilot(t);
-            g.update(33, t, c, &opts(), &au, &mut rng);
+            g.update(33, t, c, &opts(), &au, &mut rng, None);
             t += 33;
         }
         assert!(g.stats.destroyed > 20, "destroyed {}", g.stats.destroyed);

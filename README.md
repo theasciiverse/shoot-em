@@ -19,8 +19,17 @@ drops a mine. Keys: arrows aim, Space fires, M drops a mine, Escape
 returns to the menu, S shows or hides the sound scope.
 
 ```
-shoot-em [letters] [--truecolor] [--mute] [--classic] [--demo] [--seed N]
+shoot-em [letters] [--truecolor] [--mute] [--classic] [--groove] [--demo] [--seed N]
 ```
+
+**Groove mode** (G in the menu, or `--groove`; remembered): the music
+sets the pulse. Press fire on the beat and the shot is judged, PERFECT
+within 70 ms, GOOD within 130 ms, and every press on a beat builds a
+combo that multiplies what kills are worth, up to x5 (four beats without
+one and it falls apart). Objects fall in on the beats, a wave more when
+a loud bar begins, and the sound scope flashes with each beat. C in the
+menu calibrates the timing: tap Space on the clicks. Groove scores have
+their own Hall of Fame.
 
 The original's letters still work: `a` best antialiasing, `n` none, `f`
 frames per second, `m` male narrator, `c` no debris, `p` twice the

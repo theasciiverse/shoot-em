@@ -7,6 +7,7 @@ mod ascii;
 mod audio;
 mod game;
 mod gfx;
+mod groove;
 mod hiscore;
 mod input;
 mod logo;
@@ -40,8 +41,10 @@ pub struct Options {
     pub demo: bool,
     pub seed: Option<u64>,
     pub quit_after: Option<u32>,
-    /// Jan's 2005 screen exactly: no oscilloscope
+    /// Jan's 2005 screen exactly: no oscilloscope, no groove mode
     pub classic: bool,
+    /// start in groove mode (also a menu switch, remembered)
+    pub groove: bool,
 }
 
 impl Default for Options {
@@ -58,6 +61,7 @@ impl Default for Options {
             seed: None,
             quit_after: None,
             classic: false,
+            groove: false,
         }
     }
 }
@@ -80,14 +84,18 @@ Options:
   --truecolor   colour each character with its real colour, not the
                 original's 16 console colours
   --mute        no sound or music
-  --classic     Jan's 2005 screen exactly as it was (no sound scope)
+  --classic     Jan's 2005 screen exactly as it was (no sound scope, no
+                groove mode)
+  --groove      groove mode: fire on the music's beat for a combo, objects
+                fall in on the beat (also a switch in the menu)
   --demo        the computer plays (straight into a game)
   --seed N      repeatable games
   --help        this text
 
 Mouse: aim, left button fires the machine guns, right button drops a mine.
 Keys: arrows aim, Space fires, M drops a mine, Escape returns to the menu,
-S shows or hides the sound scope (remembered).
+S shows or hides the sound scope, G switches groove mode (both remembered),
+C in the menu calibrates groove timing (tap Space on the clicks).
 ";
 
 fn parse_args() -> Options {
@@ -107,6 +115,7 @@ fn parse_args() -> Options {
             "--mute" | "--silent" => o.mute = true,
             "--demo" => o.demo = true,
             "--classic" => o.classic = true,
+            "--groove" => o.groove = true,
             "--seed" => o.seed = args.next().and_then(|s| s.parse().ok()),
             "--quit-after" => o.quit_after = args.next().and_then(|s| s.parse().ok()),
             s if !s.starts_with('-') => {
@@ -146,18 +155,42 @@ fn state_dir() -> Option<PathBuf> {
     }
 }
 
-/// settings.txt in the state folder: `scope=on` or `scope=off`.
-fn load_scope(dir: &Option<PathBuf>) -> bool {
-    dir.as_ref()
-        .and_then(|d| std::fs::read_to_string(d.join("settings.txt")).ok())
-        .map(|t| !t.lines().any(|l| l.trim() == "scope=off"))
-        .unwrap_or(true)
+/// settings.txt in the state folder, one `key=value` a line: `scope=on`
+/// or `off`, `groove=on` or `off`, `offset=<ms>` (groove timing).
+#[derive(Clone, Copy, Debug)]
+struct Settings {
+    scope: bool,
+    groove: bool,
+    offset_ms: f64,
 }
 
-fn save_scope(dir: &Option<PathBuf>, on: bool) {
+fn load_settings(dir: &Option<PathBuf>) -> Settings {
+    let mut st = Settings { scope: true, groove: false, offset_ms: 0.0 };
+    if let Some(t) = dir.as_ref().and_then(|d| std::fs::read_to_string(d.join("settings.txt")).ok()) {
+        for l in t.lines() {
+            match l.trim().split_once('=') {
+                Some(("scope", v)) => st.scope = v != "off",
+                Some(("groove", v)) => st.groove = v == "on",
+                Some(("offset", v)) => st.offset_ms = v.parse().unwrap_or(0.0),
+                _ => {}
+            }
+        }
+    }
+    st
+}
+
+fn save_settings(dir: &Option<PathBuf>, st: &Settings) {
     if let Some(d) = dir {
         let _ = std::fs::create_dir_all(d);
-        let _ = std::fs::write(d.join("settings.txt"), format!("scope={}\n", if on { "on" } else { "off" }));
+        let _ = std::fs::write(
+            d.join("settings.txt"),
+            format!(
+                "scope={}\ngroove={}\noffset={:.0}\n",
+                if st.scope { "on" } else { "off" },
+                if st.groove { "on" } else { "off" },
+                st.offset_ms
+            ),
+        );
     }
 }
 
@@ -225,6 +258,8 @@ fn main() {
     let mut au = Audio::new(opts.mute);
     log.line(&format!("audio: {}", au.status));
     let mut table = hiscore::Table::load(dir.as_ref().map(|d| d.join("hiscores.txt")));
+    // groove scores are kept apart: the combo makes them a different game
+    let mut gtable = hiscore::Table::load(dir.as_ref().map(|d| d.join("hiscores-groove.txt")));
 
     let term = match Term::start() {
         Ok(t) => t,
@@ -247,7 +282,7 @@ fn main() {
         prev_hook(info);
     }));
 
-    let code = run(&opts, &mut au, &mut table, &mut log, &dir);
+    let code = run(&opts, &mut au, &mut table, &mut gtable, &mut log, &dir);
     au.stop_song();
     drop(term);
     log.line("quit");
@@ -258,10 +293,22 @@ fn run(
     opts: &Options,
     au: &mut Audio,
     table: &mut hiscore::Table,
+    gtable: &mut hiscore::Table,
     log: &mut Log,
     dir: &Option<PathBuf>,
 ) -> i32 {
-    let mut scope_on = !opts.classic && load_scope(dir);
+    let mut settings = load_settings(dir);
+    let mut scope_on = !opts.classic && settings.scope;
+    let mut groove_on = !opts.classic && (opts.groove || settings.groove);
+    let mut groove = groove::Groove::new(settings.offset_ms);
+    // fire presses this frame, at music time
+    let mut presses: Vec<f64> = Vec::new();
+    // calibration: when it began, the clicks given, the taps' offsets
+    let mut cal_start = Instant::now();
+    let mut cal_clicks = 0u32;
+    let mut cal_taps: Vec<f64> = Vec::new();
+    // groove mode in the demo: the pilot's fire, gated to the beat
+    let mut demo_was_firing = false;
     let seed = opts.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -301,10 +348,24 @@ fn run(
 
     loop {
         input.new_frame();
+        presses.clear();
         while event::poll(Duration::ZERO).unwrap_or(false) {
             if let Ok(ev) = event::read() {
+                let was = input.guns_held();
+                let left_was = input.left;
                 if let Some(l) = input.handle(&ev) {
                     log.line(&l);
+                }
+                // a press of the fire button (or a new click), timed when it
+                // is read: groove mode judges it against the music
+                let pressed = (!was && input.guns_held()) || (!left_was && input.left);
+                if pressed && groove_on && matches!(state, State::Game | State::Calibrate) {
+                    if state == State::Calibrate {
+                        presses.push(cal_start.elapsed().as_secs_f64());
+                    } else {
+                        let b = au.beats.snapshot();
+                        presses.push(groove.time(&b, Instant::now()));
+                    }
                 }
             }
         }
@@ -358,6 +419,8 @@ fn run(
                 State::Game => {
                     au.play_song(Song::Game);
                     game = game::Game::new(&mut rng);
+                    groove = groove::Groove::new(settings.offset_ms);
+                    log.line(&format!("groove {}", if groove_on { "on" } else { "off" }));
                     input.mx = w as i32 / 2;
                     input.my = h as i32 / 2;
                 }
@@ -377,6 +440,12 @@ fn run(
                     }
                 }
                 State::Instructions => scroll = 0,
+                State::Calibrate => {
+                    au.stop_song();
+                    cal_start = Instant::now();
+                    cal_clicks = 0;
+                    cal_taps.clear();
+                }
                 _ => {}
             }
         }
@@ -390,7 +459,24 @@ fn run(
                 }
             }
             State::Menu => {
-                next = screens::menu(&mut ren, &mut scr, &input, t, clock);
+                let before = groove_on;
+                next = screens::menu(
+                    &mut ren,
+                    &mut scr,
+                    &input,
+                    t,
+                    clock,
+                    if opts.classic { None } else { Some(&mut groove_on) },
+                );
+                if groove_on != before {
+                    settings.groove = groove_on;
+                    save_settings(dir, &settings);
+                    au.play_centre(sfx::CLICK);
+                    log.line(&format!("groove {}", if groove_on { "on" } else { "off" }));
+                }
+                if next == Some(State::Calibrate) {
+                    groove_on = true;
+                }
                 if let Some(n) = next {
                     au.play_centre(sfx::CLICK);
                     if n == State::Game || n == State::Quit {
@@ -402,7 +488,8 @@ fn run(
                 next = screens::instructions(&mut ren, &mut scr, &input, t, &mut scroll);
             }
             State::HighScores => {
-                next = screens::high_scores(&mut ren, &mut scr, &input, t, table, &mut hof_top);
+                let (tb, sub) = if groove_on { (&*gtable, "Groove mode") } else { (&*table, "The best players") };
+                next = screens::high_scores(&mut ren, &mut scr, &input, t, tb, &mut hof_top, sub);
             }
             State::Game => {
                 let c = if opts.demo {
@@ -418,7 +505,41 @@ fn run(
                         mine: input.mine_held(),
                     }
                 };
-                game.update(dt, t, c, opts, au, &mut rng);
+                let mut c = c;
+                let tick = if groove_on {
+                    let b = au.beats.snapshot();
+                    let now = Instant::now();
+                    let gt = groove.time(&b, now);
+                    if opts.demo {
+                        // the pilot fires in short bursts that start on the beat
+                        let near = groove.to_beat(&b, gt);
+                        let firing = c.guns && (0.0..0.12).contains(&near);
+                        if firing && !demo_was_firing {
+                            presses.push(gt - near);
+                        }
+                        demo_was_firing = firing;
+                        c.guns = firing;
+                    }
+                    let tick = groove.tick(&b);
+                    for &p in &presses {
+                        let pts = groove.press(&b, p, now);
+                        game.score += pts;
+                        if let Some((j, d, _)) = groove.last {
+                            log.line(&format!("groove press {:?} {:+.0} ms combo {} +{}", j, d * 1000.0, groove.combo, pts));
+                        }
+                    }
+                    game.groove_mult = groove.multiplier();
+                    if tick.beats > 0 {
+                        log.line(&format!(
+                            "groove beat count={} period={:.3}s down={} energy={:.2} combo={} x{}",
+                            b.count, tick.period, tick.downbeat, tick.energy, groove.combo, groove.multiplier()
+                        ));
+                    }
+                    Some(tick)
+                } else {
+                    None
+                };
+                game.update(dt, t, c, opts, au, &mut rng, tick);
                 game.draw(&mut ren, t);
                 game.hud(
                     &mut scr,
@@ -428,6 +549,25 @@ fn run(
                     c.vy.clamp(0.0, 49.0),
                     t,
                 );
+                if groove_on {
+                    let b = au.beats.snapshot();
+                    let gt = groove.time(&b, Instant::now());
+                    let pulse = groove.pulse(&b, gt);
+                    let cx = (w as i32 - 80) / 2;
+                    let a = if pulse > 0.3 { 0xf } else { 0xd };
+                    scr.put(cx + 2, 1, a, &format!(" GROOVE x{} ", groove.multiplier()));
+                    scr.put(cx + 13, 1, 0xd, &format!("  combo {:<3} ", groove.combo));
+                    if let Some((j, d, at)) = groove.last {
+                        if at.elapsed() < Duration::from_millis(700) {
+                            let (txt, col) = match j {
+                                groove::Judge::Perfect => ("PERFECT", 0xe),
+                                groove::Judge::Good => ("GOOD   ", 0xa),
+                                groove::Judge::Off => ("OFF    ", 0x8),
+                            };
+                            scr.put(cx + 62, 1, col, &format!("{txt} {:+4.0} ms", d * 1000.0));
+                        }
+                    }
+                }
                 if t >= last_snapshot + 1000 {
                     last_snapshot = t;
                     log.line(&format!(
@@ -440,7 +580,7 @@ fn run(
                     log.line(&format!("game over, score {}", game.score));
                     next = Some(if opts.demo {
                         State::Game
-                    } else if table.qualifies(game.score) {
+                    } else if (if groove_on { &*gtable } else { &*table }).qualifies(game.score) {
                         State::NameEntry
                     } else {
                         State::Score
@@ -459,17 +599,43 @@ fn run(
                     } else {
                         ne.fields[0].clone()
                     };
-                    table.insert(hiscore::Entry {
+                    let tb = if groove_on { &mut *gtable } else { &mut *table };
+                    tb.insert(hiscore::Entry {
                         nick,
                         msg1: ne.fields[1].clone(),
                         msg2: ne.fields[2].clone(),
                         score: game.score,
                     });
-                    table.save();
+                    tb.save();
                 }
             }
             State::Score => {
                 next = screens::score(&mut ren, &mut scr, &input, t, &game);
+            }
+            State::Calibrate => {
+                // clicks every 0.6 s (100 BPM), starting a second in
+                let el = cal_start.elapsed().as_secs_f64();
+                let due = ((el - 1.0) / 0.6).floor() as i64 + 1;
+                while (cal_clicks as i64) < due.max(0) {
+                    au.play_centre(sfx::CLICK);
+                    cal_clicks += 1;
+                }
+                for &p in &presses {
+                    // the nearest click, and how far from it the tap was
+                    let d = groove::to_nearest_beat(p, 1.0, 0.6);
+                    if p > 0.8 && d.abs() < 0.25 {
+                        cal_taps.push(d);
+                    }
+                }
+                let used: Vec<f64> = cal_taps.iter().skip(2).copied().collect();
+                if used.len() >= screens::CALIBRATE_TAPS && (settings.offset_ms - median(&used) * 1000.0).abs() > 0.5 {
+                    settings.offset_ms = (median(&used) * 1000.0).round();
+                    groove.offset_ms = settings.offset_ms;
+                    save_settings(dir, &settings);
+                    log.line(&format!("calibrated offset {:+.0} ms from {} taps", settings.offset_ms, used.len()));
+                }
+                let flash = el > 1.0 && groove::to_nearest_beat(el, 1.0, 0.6).abs() < 0.08;
+                next = screens::calibrate(&mut scr, &input, &used, settings.offset_ms, flash);
             }
             State::Quit => return 0,
         }
@@ -480,7 +646,8 @@ fn run(
             && input.typed.iter().any(|&c| c == 's' || c == 'S')
         {
             scope_on = !scope_on;
-            save_scope(dir, scope_on);
+            settings.scope = scope_on;
+            save_settings(dir, &settings);
             log.line(&format!("scope {}", if scope_on { "on" } else { "off" }));
         }
         if scope_on {
@@ -501,9 +668,33 @@ fn run(
             match state {
                 // its own row, directly above the HUD's boxes, as wide as
                 // the HUD (the boxes are kept at the bottom: rows h-6 to h-2)
-                State::Game => scope::draw(&mut scr, cx + 2, hi - 7, 77, 1, &samples, 1.6, 0xb),
+                State::Game => {
+                    // in groove mode it flashes white and swells on each beat
+                    let (gain, attr) = if groove_on {
+                        let b = au.beats.snapshot();
+                        let gt = groove.time(&b, Instant::now());
+                        let p = groove.pulse(&b, gt);
+                        (1.6 * (1.0 + 0.8 * p), if p > 0.3 { 0xf } else { 0xb })
+                    } else {
+                        (1.6, 0xb)
+                    };
+                    scope::draw(&mut scr, cx + 2, hi - 7, 77, 1, &samples, gain, attr)
+                }
                 State::Menu => {
-                    let (y, rows) = if hi >= 50 { ((hi - 50) / 2 + 40, 3) } else { (hi - 8, 2) };
+                    // clear of the buttons (two rows of them now) and the
+                    // credits: under the credits when the terminal has room,
+                    // else the free row between the copyright and the credits
+                    let (y, rows) = if hi >= 50 {
+                        let o = (hi - 50) / 2;
+                        let below = o + 50;
+                        if hi - below >= 2 {
+                            (below, (hi - below).min(3))
+                        } else {
+                            (o + 46, 1)
+                        }
+                    } else {
+                        (hi - 3, 1)
+                    };
                     scope::draw(&mut scr, cx + 8, y, 64, rows, &samples, 1.6, 0xb);
                 }
                 State::Score => {
@@ -563,5 +754,15 @@ fn run(
         if spent < frame_time {
             std::thread::sleep(frame_time - spent);
         }
+    }
+}
+
+fn median(v: &[f64]) -> f64 {
+    let mut s = v.to_vec();
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if s.is_empty() {
+        0.0
+    } else {
+        s[s.len() / 2]
     }
 }

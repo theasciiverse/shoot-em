@@ -11,7 +11,7 @@
 use rodio::buffer::SamplesBuffer;
 use rodio::Source;
 use std::num::NonZero;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,7 +54,8 @@ const MENU_SONG: &[u8] = include_bytes!("../assets/music/intro/crush-remix.xm");
 /// A song in the in-game playlist: Ogg Vorbis or a tracker module.
 #[derive(Clone, Copy)]
 enum Track {
-    Ogg(&'static [u8]),
+    /// an Ogg song and its index in `OGG_GRID`
+    Ogg(&'static [u8], usize),
     /// a module, and the trim that matches it to Junkala's level
     Module(&'static [u8], f32),
 }
@@ -65,10 +66,10 @@ enum Track {
 /// and Tunnel Vision by fuzion_mixer, CC BY 4.0, remixed and extended by
 /// Asciiverse.
 const LEVEL_SONGS: [Track; 7] = [
-    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-1.ogg")),
+    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-1.ogg"), 0),
     Track::Module(include_bytes!("../assets/music/levels/digital-rendezvous-remix-heavy.xm"), 2.13),
-    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-2.ogg")),
-    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-3.ogg")),
+    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-2.ogg"), 1),
+    Track::Ogg(include_bytes!("../assets/music/levels/junkala-level-3.ogg"), 2),
     // builds its drums over about 2:40 and then loops at its peak; the
     // playlist plays it once through from the start, then moves on
     Track::Module(include_bytes!("../assets/music/levels/mecanum-remix-heavy.xm"), 2.41),
@@ -78,6 +79,18 @@ const LEVEL_SONGS: [Track; 7] = [
     // Girl From Mars (Asciiverse extended mix), after Drozerix (public domain)
     Track::Module(include_bytes!("../assets/music/levels/girl_from_mars-extended.xm"), 2.11),
 ];
+/// The groove beat of each Ogg level song, measured once from the audio
+/// (onset autocorrelation, kick-weighted; see PATCHES.md): beats per
+/// minute, the first beat in seconds, and which beat starts a bar. Level 1
+/// runs at about 181 BPM; its groove beat is the half-time pulse on the
+/// kicks (90.5). Each loop is a whole number of bars (28, 32, 36).
+/// Modules need no table: their beats come from the rows as they play.
+const OGG_GRID: [(f64, f64, u64); 3] = [
+    (181.09 / 2.0, 0.5548, 1),
+    (105.505, 0.4586, 2),
+    (105.445, 0.4209, 2),
+];
+
 /// Juhani Junkala, Title Screen (CC0): after a game and in the Hall of Fame.
 const END_SONG: &[u8] = include_bytes!("../assets/music/end/junkala-title-screen.ogg");
 /// The menu song plays through, rests this long, and starts again.
@@ -205,6 +218,8 @@ pub struct Audio {
     song: Option<(Song, Arc<AtomicBool>)>,
     /// the level track to play next, kept across games
     next_level: Arc<AtomicUsize>,
+    /// where the in-game music is (groove mode)
+    pub beats: Arc<Beats>,
     pub status: String,
 }
 
@@ -228,6 +243,7 @@ impl Audio {
             pcm: Vec::new(),
             song: None,
             next_level: Arc::new(AtomicUsize::new(0)),
+            beats: Arc::new(Beats::new()),
             status: String::new(),
         };
         let device = if mute {
@@ -334,13 +350,10 @@ impl Audio {
                 );
             }
             Song::Game => {
+                self.beats = Arc::new(Beats::new());
                 self.mix.add(
-                    Playlist {
-                        next: self.next_level.clone(),
-                        current: None,
-                        stop: stop.clone(),
-                    }
-                    .amplify(LEVEL_GAIN),
+                    Playlist::new(self.next_level.clone(), stop.clone(), self.beats.clone())
+                        .amplify(LEVEL_GAIN),
                 );
             }
             Song::End => {
@@ -427,55 +440,235 @@ impl Source for MenuLoop {
 
 /// One level song while it plays, as stereo 44.1 kHz samples.
 enum Playing {
-    Ogg(rodio::Decoder<std::io::Cursor<&'static [u8]>>),
-    Module(Box<xmrsplayer::prelude::XmrsPlayer<'static>>, f32),
+    /// the decoder, and the song's groove beat: first beat and period in
+    /// frames, and which beat starts a bar
+    Ogg(rodio::Decoder<std::io::Cursor<&'static [u8]>>, f64, f64, u64),
+    /// the player, its trim, rows per groove beat, the last (pattern, row)
+    /// seen, and the frame the song's previous beat fell on
+    Module(Box<xmrsplayer::prelude::XmrsPlayer<'static>>, f32, usize, (usize, usize), u64),
 }
 
 impl Playing {
     fn start(t: Track) -> Option<Playing> {
         match t {
-            Track::Ogg(b) => rodio::Decoder::try_from(std::io::Cursor::new(b)).ok().map(Playing::Ogg),
+            Track::Ogg(b, g) => {
+                let (bpm, first, down) = OGG_GRID[g];
+                let period = RATE as f64 * 60.0 / bpm;
+                rodio::Decoder::try_from(std::io::Cursor::new(b))
+                    .ok()
+                    .map(|d| Playing::Ogg(d, first * RATE as f64, period, down))
+            }
             Track::Module(b, trim) => {
                 let m = xmrs::prelude::Module::load(b).ok()?;
                 let m: &'static xmrs::prelude::Module = Box::leak(Box::new(m));
                 let mut p = xmrsplayer::prelude::XmrsPlayer::new(m, RATE, 0);
                 // once through, then the next song
                 p.set_max_loop_count(1);
-                Some(Playing::Module(Box::new(p), trim))
+                Some(Playing::Module(Box::new(p), trim, 0, (usize::MAX, usize::MAX), 0))
             }
         }
     }
     fn next(&mut self) -> Option<f32> {
         match self {
-            Playing::Ogg(d) => d.next(),
-            Playing::Module(p, trim) => p.next().map(|v| v as f32 / 32768.0 * *trim),
+            Playing::Ogg(d, ..) => d.next(),
+            Playing::Module(p, trim, ..) => p.next().map(|v| v as f32 / 32768.0 * *trim),
+        }
+    }
+    /// Called once a stereo frame, `f` frames into the song: whether a
+    /// groove beat starts here, and if so whether it starts a bar, and the
+    /// beat's period in frames.
+    fn beat(&mut self, f: u64) -> Option<(bool, f64)> {
+        match self {
+            Playing::Ogg(_, first, period, down) => {
+                // a beat starts in this frame when a beat time falls in
+                // [f - 0.5, f + 0.5)
+                let x = f as f64 - *first;
+                let a = ((x + 0.5) / *period).floor();
+                let b = ((x - 0.5) / *period).floor();
+                if a > b && a >= 0.0 {
+                    let k = a as u64;
+                    Some((k % 4 == *down % 4, *period))
+                } else {
+                    None
+                }
+            }
+            Playing::Module(p, _, rows_per_beat, seen, prev) => {
+                let now = (p.playing_pattern(), p.playing_row());
+                if now == *seen {
+                    return None;
+                }
+                *seen = now;
+                // the groove beat: four rows at the song's speed, doubled
+                // until it falls between 0.38 and 0.9 s (a pulse a player can
+                // fire to)
+                let row_s = p.get_tempo().max(1) as f64 * 2.5 / p.get_bpm().max(1) as f64;
+                let mut rpb = 4usize;
+                while (rpb as f64) * row_s < 0.38 && rpb < 32 {
+                    rpb *= 2;
+                }
+                *rows_per_beat = rpb;
+                if now.1 % rpb != 0 {
+                    return None;
+                }
+                let period = rpb as f64 * row_s * RATE as f64;
+                *prev = f;
+                Some((now.1 % (rpb * 4) == 0, period))
+            }
         }
     }
 }
+
+/// Where the in-game music is, for groove mode: written by the audio side
+/// once a frame, read by the game. Frames are stereo frames at 44.1 kHz
+/// since the playlist began (they keep counting across songs).
+pub struct Beats {
+    frames: AtomicU64,
+    /// the frame the last groove beat fell on, and its period in frames
+    last_beat: AtomicU64,
+    period: AtomicU32,
+    /// beats so far, and the number of the last one that started a bar
+    count: AtomicU64,
+    last_downbeat: AtomicU64,
+    /// loudness of the last whole bar and its running average (f32 bits)
+    bar_energy: AtomicU32,
+    avg_energy: AtomicU32,
+    pub playing: AtomicBool,
+}
+
+impl Beats {
+    fn new() -> Beats {
+        Beats {
+            frames: AtomicU64::new(0),
+            last_beat: AtomicU64::new(0),
+            period: AtomicU32::new(RATE / 2),
+            count: AtomicU64::new(0),
+            last_downbeat: AtomicU64::new(u64::MAX),
+            bar_energy: AtomicU32::new(0),
+            avg_energy: AtomicU32::new(0),
+            playing: AtomicBool::new(false),
+        }
+    }
+    pub fn snapshot(&self) -> BeatState {
+        BeatState {
+            frames: self.frames.load(Ordering::Relaxed),
+            last_beat: self.last_beat.load(Ordering::Relaxed),
+            period: self.period.load(Ordering::Relaxed) as f64,
+            count: self.count.load(Ordering::Relaxed),
+            last_downbeat: self.last_downbeat.load(Ordering::Relaxed),
+            bar_energy: f32::from_bits(self.bar_energy.load(Ordering::Relaxed)),
+            avg_energy: f32::from_bits(self.avg_energy.load(Ordering::Relaxed)),
+            playing: self.playing.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// A copy of `Beats` at one moment.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BeatState {
+    pub frames: u64,
+    pub last_beat: u64,
+    pub period: f64,
+    pub count: u64,
+    pub last_downbeat: u64,
+    pub bar_energy: f32,
+    pub avg_energy: f32,
+    pub playing: bool,
+}
+
+pub const FRAMES_PER_SECOND: f64 = RATE as f64;
 
 /// The level songs one after another, carrying on across games.
 struct Playlist {
     next: Arc<AtomicUsize>,
     current: Option<Playing>,
     stop: Arc<AtomicBool>,
+    beats: Arc<Beats>,
+    /// frames into the current song and into the whole playlist
+    song_frames: u64,
+    frames: u64,
+    odd: bool,
+    left: f32,
+    /// the bar being measured: sum of squares and frames
+    bar_sq: f64,
+    bar_n: u64,
+}
+
+impl Playlist {
+    fn new(next: Arc<AtomicUsize>, stop: Arc<AtomicBool>, beats: Arc<Beats>) -> Playlist {
+        beats.playing.store(true, Ordering::Relaxed);
+        Playlist {
+            next,
+            current: None,
+            stop,
+            beats,
+            song_frames: 0,
+            frames: 0,
+            odd: false,
+            left: 0.0,
+            bar_sq: 0.0,
+            bar_n: 0,
+        }
+    }
+
+    /// Once a stereo frame: count it, and note a beat when one starts.
+    fn frame(&mut self, l: f32, r: f32) {
+        let m = (l + r) * 0.5;
+        self.bar_sq += (m * m) as f64;
+        self.bar_n += 1;
+        if let Some(c) = &mut self.current {
+            if let Some((down, period)) = c.beat(self.song_frames) {
+                let b = &self.beats;
+                b.last_beat.store(self.frames, Ordering::Relaxed);
+                b.period.store(period.round() as u32, Ordering::Relaxed);
+                let n = b.count.fetch_add(1, Ordering::Relaxed) + 1;
+                if down {
+                    if self.bar_n > 0 {
+                        let e = (self.bar_sq / self.bar_n as f64).sqrt() as f32;
+                        let avg = f32::from_bits(b.avg_energy.load(Ordering::Relaxed));
+                        let avg = if avg == 0.0 { e } else { avg * 0.8 + e * 0.2 };
+                        b.bar_energy.store(e.to_bits(), Ordering::Relaxed);
+                        b.avg_energy.store(avg.to_bits(), Ordering::Relaxed);
+                    }
+                    self.bar_sq = 0.0;
+                    self.bar_n = 0;
+                    b.last_downbeat.store(n, Ordering::Relaxed);
+                }
+            }
+        }
+        self.song_frames += 1;
+        self.frames += 1;
+        self.beats.frames.store(self.frames, Ordering::Relaxed);
+    }
 }
 
 impl Iterator for Playlist {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
         if self.stop.load(Ordering::Relaxed) {
+            self.beats.playing.store(false, Ordering::Relaxed);
             return None;
         }
+        let mut v = None;
         for _ in 0..LEVEL_SONGS.len() + 1 {
             if let Some(d) = &mut self.current {
-                if let Some(v) = d.next() {
-                    return Some(v);
+                if let Some(x) = d.next() {
+                    v = Some(x);
+                    break;
                 }
             }
             let i = self.next.fetch_add(1, Ordering::Relaxed) % LEVEL_SONGS.len();
             self.current = Playing::start(LEVEL_SONGS[i]);
+            self.song_frames = 0;
         }
-        Some(0.0)
+        let v = v.unwrap_or(0.0);
+        if self.odd {
+            let l = self.left;
+            self.frame(l, v);
+        } else {
+            self.left = v;
+        }
+        self.odd = !self.odd;
+        Some(v)
     }
 }
 
@@ -569,7 +762,7 @@ mod tests {
     #[test]
     fn every_song_decodes_at_44k_stereo() {
         let oggs = super::LEVEL_SONGS.iter().filter_map(|t| match t {
-            super::Track::Ogg(b) => Some(*b),
+            super::Track::Ogg(b, _) => Some(*b),
             super::Track::Module(..) => None,
         });
         for b in oggs.chain([super::END_SONG]) {
@@ -601,11 +794,12 @@ mod tests {
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Arc;
         let next = Arc::new(AtomicUsize::new(0));
-        let mut p = super::Playlist { next: next.clone(), current: None, stop: Arc::new(AtomicBool::new(false)) };
+        let beats = Arc::new(super::Beats::new());
+        let mut p = super::Playlist::new(next.clone(), Arc::new(AtomicBool::new(false)), beats.clone());
         assert!(p.next().is_some());
         assert_eq!(next.load(Ordering::Relaxed), 1, "the first song started");
         // a new game starts with the next song
-        let mut q = super::Playlist { next: next.clone(), current: None, stop: Arc::new(AtomicBool::new(false)) };
+        let mut q = super::Playlist::new(next.clone(), Arc::new(AtomicBool::new(false)), beats);
         q.next();
         assert_eq!(next.load(Ordering::Relaxed), 2);
     }
@@ -617,5 +811,31 @@ mod tests {
         a.tick(500);
         let s = a.scope.snapshot();
         assert!(s.iter().any(|v| v.abs() > 0.01), "the scope saw only silence");
+    }
+
+    #[test]
+    fn every_level_song_gives_a_steady_groove_beat() {
+        // the first 40 s of each song: beats keep coming, at a pulse a
+        // player can fire to (0.38 to 0.9 s), and bars come every 4 beats
+        for (i, t) in super::LEVEL_SONGS.iter().enumerate() {
+            let mut p = super::Playing::start(*t).expect("song");
+            let mut beats = Vec::new();
+            for f in 0..(44_100u64 * 40) {
+                if p.next().is_none() || p.next().is_none() {
+                    break;
+                }
+                if let Some((down, period)) = p.beat(f) {
+                    beats.push((f, down, period));
+                }
+            }
+            assert!(beats.len() > 30, "song {i}: only {} beats", beats.len());
+            let gaps: Vec<f64> = beats.windows(2).map(|w| (w[1].0 - w[0].0) as f64 / 44_100.0).collect();
+            let mean = gaps.iter().sum::<f64>() / gaps.len() as f64;
+            let downs = beats.iter().filter(|b| b.1).count();
+            eprintln!("song {i}: {} beats, {:.1} BPM, {} downbeats, first {:?}", beats.len(), 60.0 / mean, downs, &beats[..6.min(beats.len())]);
+            assert!((0.38..=0.9).contains(&mean), "song {i}: beat every {mean:.3} s");
+            // about one in four (patterns of odd lengths shift it a little)
+            assert!(downs * 4 + 12 >= beats.len() && downs * 4 <= beats.len() + 12, "song {i}: {downs} downbeats");
+        }
     }
 }
