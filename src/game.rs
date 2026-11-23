@@ -176,7 +176,7 @@ pub const TIPS: [&str; 12] = [
     "Tip: Try to collect bonuses first before detonating mines.",
     "Tip: Do not let ultra ammo to be destroyed by mines.",
     "Tip: Ladies, switch to male narrator by \"m\" command line option.",
-    "Tip: Visit http://Tringi.Mx-3.cz when you exit the game ;-)",
+    "Tip: Visit http://Tringi.Trimcore.cz when you exit the game ;-)",
 ];
 
 /// What the player does this frame, in the original's terms: the mouse
